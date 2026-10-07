@@ -1,5 +1,7 @@
 """All tunable settings in one place."""
 
+from pathlib import Path
+
 # --- HTTP ------------------------------------------------------------------
 # OSM services require an identifying User-Agent; websites see it too.
 USER_AGENT = "dish-finder/0.1 (personal hobby project)"
@@ -33,6 +35,14 @@ MENU_KEYWORDS = (
 MAX_DEPTH = 2  # homepage -> menu page -> PDF linked from the menu page
 MAX_BYTES = 15 * 1024 * 1024
 RESTAURANT_TIMEOUT = 90  # seconds per restaurant, partial results are kept
+
+# --- Cache -------------------------------------------------------------------
+# Crawled website text, place lookups and OSM results are stored here, so a
+# search for another dish in the same area needs no network at all.
+CACHE_PATH = Path.home() / ".cache" / "dish-finder" / "cache.sqlite3"
+CACHE_MAX_AGE = 14 * 24 * 3600  # seconds; older entries are fetched again
+# Failed crawls (dead domain, timeout, …) are retried sooner, but not on every run.
+CACHE_ERROR_MAX_AGE = 24 * 3600
 
 # --- Matching ----------------------------------------------------------------
 SNIPPET_RADIUS = 60  # characters shown around a hit

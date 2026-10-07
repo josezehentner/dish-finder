@@ -9,15 +9,25 @@ import argparse
 import asyncio
 import logging
 import sys
+from dataclasses import asdict, dataclass
 
 import config
-from crawler import CrawlResult, crawl_all
-from osm import find_restaurants, geocode
+from cache import Cache, site_key
+from crawler import Snapshot, crawl_all
+from matching import Hit, search
+from osm import Restaurant, find_restaurants, geocode
 
 log = logging.getLogger(__name__)
 
 # Third-party loggers that are too chatty for the console.
 NOISY_LOGGERS = ("httpx", "httpcore", "pypdf")
+
+
+@dataclass
+class Result:
+    restaurant: Restaurant
+    snapshot: Snapshot
+    hits: list[Hit]
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -44,6 +54,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--whole-word", action="store_true", help="'mate' won't match 'tomate'")
     parser.add_argument("-v", "--verbose", action="store_true", help="also list restaurants without hits")
     parser.add_argument("--debug", action="store_true", help="log every fetched URL and why pages were skipped")
+    cache = parser.add_mutually_exclusive_group()
+    cache.add_argument("--refresh", action="store_true", help="ignore cached data, fetch everything again")
+    cache.add_argument("--no-cache", action="store_true", help="neither read nor write the cache")
     return parser.parse_args(argv)
 
 
@@ -57,7 +70,7 @@ def configure_logging(debug: bool) -> None:
         logging.getLogger(name).setLevel(logging.WARNING if debug else logging.ERROR)
 
 
-def print_hit(result: CrawlResult) -> None:
+def print_hit(result: Result) -> None:
     r = result.restaurant
     print(f"\n✔ {r.name} ({r.amenity})")
     print(f"  {r.osm_url}")
@@ -66,55 +79,92 @@ def print_hit(result: CrawlResult) -> None:
         print(f"      …{hit.snippet}…")
 
 
-def print_miss(result: CrawlResult) -> None:
-    r = result.restaurant
-    details = f"{result.pages} pages, {result.pdfs} PDFs"
-    if result.unreadable_pdfs:
-        details += f", {len(result.unreadable_pdfs)} PDFs without text (scanned?)"
-    if result.error:
-        details += f", error: {result.error}"
+def print_miss(result: Result) -> None:
+    r, snap = result.restaurant, result.snapshot
+    details = f"{snap.pages} pages, {snap.pdfs} PDFs"
+    if snap.unreadable_pdfs:
+        details += f", {len(snap.unreadable_pdfs)} PDFs without text (scanned?)"
+    if snap.error:
+        details += f", error: {snap.error}"
     print(f"  ✘ {r.name} — {r.websites[0]} ({details})")
 
 
-def main(argv: list[str] | None = None) -> None:
-    args = parse_args(argv)
-    configure_logging(args.debug)
+def cached_geocode(cache: Cache, place: str) -> tuple[float, float]:
+    key = f"geocode:{place.strip().casefold()}"
+    if (cached := cache.get_json(key)) is not None:
+        lat, lon = cached
+    else:
+        lat, lon = geocode(place)
+        cache.put_json(key, [lat, lon])
+    return lat, lon
 
+
+def cached_restaurants(cache: Cache, lat: float, lon: float, radius: int) -> list[Restaurant]:
+    key = f"overpass:{lat:.5f},{lon:.5f},{radius}"
+    if (cached := cache.get_json(key)) is not None:
+        log.debug("Places for %s from cache", key)
+        return [Restaurant(**r) for r in cached]
+    restaurants = find_restaurants(lat, lon, radius)
+    cache.put_json(key, [asdict(r) for r in restaurants])
+    return restaurants
+
+
+def collect_snapshots(cache: Cache, places: list[Restaurant], args: argparse.Namespace) -> dict[str, Snapshot]:
+    """Snapshots per website: from the cache where possible, crawled otherwise."""
+    snapshots: dict[str, Snapshot] = {}
+    to_crawl: dict[str, Restaurant] = {}  # one crawl per website, even if several places share it
+    for place in places:
+        key = site_key(place.websites)
+        if key in snapshots or key in to_crawl:
+            continue
+        if (cached := cache.get_snapshot(key)) is not None:
+            snapshots[key] = cached
+        else:
+            to_crawl[key] = place
+    log.info("💾 %s websites from cache, crawling %s", len(snapshots), len(to_crawl))
+    if not to_crawl:
+        return snapshots
+
+    done = 0
+
+    def on_done(place: Restaurant, snapshot: Snapshot) -> None:
+        nonlocal done
+        done += 1
+        key = site_key(place.websites)
+        snapshots[key] = snapshot
+        cache.put_snapshot(key, snapshot)  # failed crawls expire sooner, see config.CACHE_ERROR_MAX_AGE
+        if args.debug:
+            log.debug("Done %s/%s: %s", done, len(to_crawl), place.name)
+        else:
+            # A single self-overwriting progress line; it would garble debug output.
+            print(f"\r🔎 crawled {done}/{len(to_crawl)}", end="", file=sys.stderr, flush=True)
+
+    asyncio.run(
+        crawl_all(list(to_crawl.values()), max_pages=args.max_pages, concurrency=args.concurrency, on_done=on_done)
+    )
+    if not args.debug:
+        print(file=sys.stderr)  # end the progress line
+    return snapshots
+
+
+def run(args: argparse.Namespace, cache: Cache) -> None:
     if args.near:
-        lat, lon = geocode(args.near)
+        lat, lon = cached_geocode(cache, args.near)
         log.info("📍 %s → %.5f, %.5f", args.near, lat, lon)
     else:
         lat, lon = args.coords
 
-    restaurants = find_restaurants(lat, lon, args.radius)
+    restaurants = cached_restaurants(cache, lat, lon, args.radius)
     with_website = [r for r in restaurants if r.websites]
     log.info("🍽  %s places in %s m, %s with a website", len(restaurants), args.radius, len(with_website))
     if not with_website:
         return
 
-    done = 0
-
-    def on_done(result: CrawlResult) -> None:
-        nonlocal done
-        done += 1
-        if args.debug:
-            log.debug("Done %s/%s: %s", done, len(with_website), result.restaurant.name)
-        else:
-            # A single self-overwriting progress line; it would garble debug output.
-            print(f"\r🔎 crawled {done}/{len(with_website)}", end="", file=sys.stderr, flush=True)
-
-    results = asyncio.run(
-        crawl_all(
-            with_website,
-            args.terms,
-            max_pages=args.max_pages,
-            concurrency=args.concurrency,
-            whole_word=args.whole_word,
-            on_done=on_done,
-        )
-    )
-    if not args.debug:
-        print(file=sys.stderr)  # end the progress line
+    snapshots = collect_snapshots(cache, with_website, args)
+    results = []
+    for place in with_website:
+        snapshot = snapshots[site_key(place.websites)]
+        results.append(Result(place, snapshot, search(snapshot.documents, args.terms, args.whole_word)))
 
     found = sorted((r for r in results if r.hits), key=lambda r: r.restaurant.name.casefold())
     print(f"\n{len(found)} of {len(results)} crawled places mention {' / '.join(args.terms)}")
@@ -125,6 +175,16 @@ def main(argv: list[str] | None = None) -> None:
         print("\nNo hits:")
         for result in sorted((r for r in results if not r.hits), key=lambda r: r.restaurant.name.casefold()):
             print_miss(result)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+    configure_logging(args.debug)
+    path = ":memory:" if args.no_cache else config.CACHE_PATH
+    # --refresh: only entries written during this run count as fresh.
+    max_age, error_max_age = (0, 0) if args.refresh else (config.CACHE_MAX_AGE, config.CACHE_ERROR_MAX_AGE)
+    with Cache(path, max_age=max_age, error_max_age=error_max_age) as cache:
+        run(args, cache)
 
 
 if __name__ == "__main__":

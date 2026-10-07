@@ -2,10 +2,12 @@
 
 import logging
 from collections.abc import Callable, Iterator
+from pathlib import Path
 
 import httpx
 import pytest
 
+import config
 from osm import Restaurant
 
 # A route answers with a fixed response, builds one from the request, or raises.
@@ -78,6 +80,14 @@ def make_restaurant(*websites: str, name: str = "Gasthaus Test") -> Restaurant:
 @pytest.fixture
 def fake_web() -> Callable[[dict[str, Route]], FakeWeb]:
     return FakeWeb
+
+
+@pytest.fixture(autouse=True)
+def isolated_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Never touch the real cache in ~/.cache during tests."""
+    path = tmp_path / "cache.sqlite3"
+    monkeypatch.setattr(config, "CACHE_PATH", path)
+    return path
 
 
 @pytest.fixture(autouse=True)

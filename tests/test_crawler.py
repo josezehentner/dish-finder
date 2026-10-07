@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 import config
 import crawler
 from crawler import (
-    CrawlResult,
+    Snapshot,
     _allowed,
     _crawl,
     _fetch,
@@ -19,21 +19,26 @@ from crawler import (
     _pdf_text,
     crawl_all,
 )
+from matching import Document, Hit, search
 from tests.conftest import build_pdf, html, make_restaurant, pdf
 
 SITE = "https://wirt.at"
 
 
-def crawl(web, *websites: str, terms=("Tafelspitz",), max_pages: int = 15, whole_word: bool = False) -> CrawlResult:
-    """Run _crawl against a FakeWeb and return the result."""
-    result = CrawlResult(make_restaurant(*websites))
+def crawl(web, *websites: str, max_pages: int = 15) -> Snapshot:
+    """Run _crawl against a FakeWeb and return what it found."""
+    snapshot = Snapshot()
 
     async def run():
         async with web.client() as client:
-            await _crawl(client, result, list(terms), max_pages, whole_word)
+            await _crawl(client, snapshot, list(websites), max_pages)
 
     asyncio.run(run())
-    return result
+    return snapshot
+
+
+def hits(snapshot: Snapshot, term: str = "Tafelspitz") -> list[Hit]:
+    return search(snapshot.documents, [term])
 
 
 class TestUrlHelpers:
@@ -167,7 +172,7 @@ class TestCrawl:
 
         result = crawl(web, f"{SITE}/")
 
-        assert {(h.url, h.kind) for h in result.hits} == {
+        assert {(h.url, h.kind) for h in hits(result)} == {
             (f"{SITE}/", "html"),
             (f"{SITE}/speisekarte", "html"),
             ("https://cdn.example.com/karte.pdf", "pdf"),
@@ -193,19 +198,20 @@ class TestCrawl:
                 ),
             }
         )
-        assert crawl(web, f"{SITE}/").hits == []
+        assert hits(crawl(web, f"{SITE}/")) == []
 
     def test_detects_pdf_by_content_without_pdf_extension(self, fake_web):
         web = fake_web({f"{SITE}/download?id=3": pdf(build_pdf("Tafelspitz"), content_type="application/octet-stream")})
         result = crawl(web, f"{SITE}/download?id=3")
         assert result.pdfs == 1
-        assert result.hits[0].kind == "pdf"
+        assert hits(result)[0].kind == "pdf"
 
     def test_records_pdfs_without_text(self, fake_web):
         web = fake_web({f"{SITE}/scan.pdf": pdf(build_pdf())})
         result = crawl(web, f"{SITE}/scan.pdf")
         assert result.unreadable_pdfs == [f"{SITE}/scan.pdf"]
-        assert result.hits == []
+        assert hits(result) == []
+        assert result.documents == []
 
     def test_stops_at_max_depth(self, fake_web):
         web = fake_web(
@@ -260,26 +266,26 @@ class TestCrawl:
         )
         result = crawl(web, f"{SITE}/")
         assert result.error is None
-        assert len(result.hits) == 1
+        assert len(hits(result)) == 1
 
 
 class TestCrawlAll:
-    def run(self, restaurants, **kwargs) -> list[CrawlResult]:
-        options = {"max_pages": 5, "concurrency": 2, "whole_word": False} | kwargs
-        return asyncio.run(crawl_all(restaurants, ["Tafelspitz"], **options))
+    def run(self, restaurants, **kwargs) -> list[Snapshot]:
+        options = {"max_pages": 5, "concurrency": 2} | kwargs
+        return asyncio.run(crawl_all(restaurants, **options))
 
-    def test_returns_results_in_input_order_and_reports_progress(self, monkeypatch):
-        async def fake_crawl(client, result, terms, max_pages, whole_word):
-            result.pages = 1
+    def test_returns_snapshots_in_input_order_and_reports_progress(self, monkeypatch):
+        async def fake_crawl(client, snapshot, seeds, max_pages):
+            snapshot.documents.append(Document(seeds[0], "html", "text"))
 
         monkeypatch.setattr(crawler, "_crawl", fake_crawl)
-        restaurants = [make_restaurant(SITE, name=f"R{i}") for i in range(3)]
-        done: list[CrawlResult] = []
+        restaurants = [make_restaurant(f"https://r{i}.at", name=f"R{i}") for i in range(3)]
+        done: list[tuple[str, str]] = []
 
-        results = self.run(restaurants, on_done=done.append)
+        snapshots = self.run(restaurants, on_done=lambda r, snap: done.append((r.name, snap.documents[0].url)))
 
-        assert [r.restaurant.name for r in results] == ["R0", "R1", "R2"]
-        assert sorted(r.restaurant.name for r in done) == ["R0", "R1", "R2"]
+        assert [snap.documents[0].url for snap in snapshots] == ["https://r0.at", "https://r1.at", "https://r2.at"]
+        assert sorted(done) == [("R0", "https://r0.at"), ("R1", "https://r1.at"), ("R2", "https://r2.at")]
 
     def test_limits_concurrency(self, monkeypatch):
         running = peak = 0
@@ -296,26 +302,26 @@ class TestCrawlAll:
         assert peak == 2
 
     def test_timeout_keeps_partial_results(self, monkeypatch):
-        async def slow_crawl(client, result, *args):
-            result.pages = 1
+        async def slow_crawl(client, snapshot, *args):
+            snapshot.pages = 1
             await asyncio.sleep(10)
 
         monkeypatch.setattr(crawler, "_crawl", slow_crawl)
         monkeypatch.setattr(config, "RESTAURANT_TIMEOUT", 0.01)
 
-        [result] = self.run([make_restaurant(SITE)])
+        [snapshot] = self.run([make_restaurant(SITE)])
 
-        assert result.error == "timeout (partial results)"
-        assert result.pages == 1
+        assert snapshot.error == "timeout (partial results)"
+        assert snapshot.pages == 1
 
     def test_crash_of_one_site_does_not_stop_the_others(self, monkeypatch):
-        async def fake_crawl(client, result, *args):
-            if result.restaurant.name == "Broken":
+        async def fake_crawl(client, snapshot, seeds, max_pages):
+            if seeds == ["https://broken.at"]:
                 raise KeyError("oops")
 
         monkeypatch.setattr(crawler, "_crawl", fake_crawl)
 
-        broken, ok = self.run([make_restaurant(SITE, name="Broken"), make_restaurant(SITE, name="Ok")])
+        broken, ok = self.run([make_restaurant("https://broken.at"), make_restaurant(SITE)])
 
         assert broken.error == "crashed: KeyError: 'oops'"
         assert ok.error is None
@@ -355,7 +361,7 @@ class TestDuplicates:
         result = crawl(web, f"{SITE}/")
         karte_requests = [u for u in web.requested if "karte" in u]
         assert karte_requests == [f"{SITE}/karte"]
-        assert len(result.hits) == 1
+        assert len(hits(result)) == 1
 
     def test_same_pdf_on_two_hosts_counts_once(self, fake_web):
         menu = build_pdf("Kaspressknoedel")
@@ -368,9 +374,9 @@ class TestDuplicates:
                 "https://cdn-b.example/karte.pdf": pdf(menu),
             }
         )
-        result = crawl(web, f"{SITE}/", terms=("Kaspressknödel",))
+        result = crawl(web, f"{SITE}/")
         assert result.pdfs == 1
-        assert [h.url for h in result.hits] == ["https://cdn-a.example/karte.pdf"]
+        assert [h.url for h in hits(result, "Kaspressknödel")] == ["https://cdn-a.example/karte.pdf"]
 
     def test_redirect_to_already_seen_page_is_skipped(self, fake_web):
         web = fake_web(
@@ -381,7 +387,7 @@ class TestDuplicates:
         )
         result = crawl(web, f"{SITE}/")
         assert result.pages == 1
-        assert len(result.hits) == 1
+        assert len(hits(result)) == 1
 
     def test_different_content_on_different_pages_is_kept(self, fake_web):
         web = fake_web(
@@ -417,7 +423,7 @@ class TestDebugLogging:
 
         monkeypatch.setattr(crawler, "_crawl", broken_crawl)
         with caplog.at_level(logging.DEBUG, logger="crawler"):
-            asyncio.run(crawl_all([make_restaurant(SITE)], ["x"], max_pages=1, concurrency=1, whole_word=False))
+            asyncio.run(crawl_all([make_restaurant(SITE)], max_pages=1, concurrency=1))
 
         [record] = [r for r in caplog.records if "crashed" in r.message]
         assert record.exc_info is not None

@@ -1,4 +1,4 @@
-"""Crawl restaurant websites for menu pages and PDFs and search them."""
+"""Crawl restaurant websites for menu pages and PDFs and extract their text."""
 
 import asyncio
 import hashlib
@@ -15,16 +15,17 @@ from bs4 import BeautifulSoup
 from pypdf import PdfReader
 
 import config
-from matching import Hit, find_hits
+from matching import Document
 from osm import Restaurant
 
 log = logging.getLogger(__name__)
 
 
 @dataclass
-class CrawlResult:
-    restaurant: Restaurant
-    hits: list[Hit] = field(default_factory=list)
+class Snapshot:
+    """Everything found on one website, independent of what is searched for."""
+
+    documents: list[Document] = field(default_factory=list)
     pages: int = 0
     pdfs: int = 0
     unreadable_pdfs: list[str] = field(default_factory=list)  # scanned/image-only
@@ -33,40 +34,35 @@ class CrawlResult:
 
 async def crawl_all(
     restaurants: list[Restaurant],
-    terms: list[str],
     *,
     max_pages: int,
     concurrency: int,
-    whole_word: bool,
-    on_done: Callable[[CrawlResult], None] = lambda _: None,
-) -> list[CrawlResult]:
+    on_done: Callable[[Restaurant, Snapshot], None] = lambda *_: None,
+) -> list[Snapshot]:
     semaphore = asyncio.Semaphore(concurrency)
     async with httpx.AsyncClient(
         headers={"User-Agent": config.USER_AGENT}, timeout=config.HTTP_TIMEOUT, follow_redirects=True
     ) as client:
 
-        async def run(restaurant: Restaurant) -> CrawlResult:
-            result = CrawlResult(restaurant)
+        async def run(restaurant: Restaurant) -> Snapshot:
+            snapshot = Snapshot()
             async with semaphore:
                 try:
                     await asyncio.wait_for(
-                        _crawl(client, result, terms, max_pages, whole_word), config.RESTAURANT_TIMEOUT
+                        _crawl(client, snapshot, restaurant.websites, max_pages), config.RESTAURANT_TIMEOUT
                     )
                 except TimeoutError:
-                    result.error = "timeout (partial results)"
+                    snapshot.error = "timeout (partial results)"
                 except Exception as exc:  # one weird website must not kill the whole run
                     log.debug("Crawling %s crashed", restaurant.name, exc_info=True)
-                    result.error = f"crashed: {type(exc).__name__}: {exc}"
-            on_done(result)
-            return result
+                    snapshot.error = f"crashed: {type(exc).__name__}: {exc}"
+            on_done(restaurant, snapshot)
+            return snapshot
 
         return await asyncio.gather(*(run(r) for r in restaurants))
 
 
-async def _crawl(
-    client: httpx.AsyncClient, result: CrawlResult, terms: list[str], max_pages: int, whole_word: bool
-) -> None:
-    seeds = result.restaurant.websites
+async def _crawl(client: httpx.AsyncClient, snapshot: Snapshot, seeds: list[str], max_pages: int) -> None:
     site_hosts = {_host(url) for url in seeds}
     queue = deque((url, 0) for url in seeds)
     seen_urls = {_url_key(url) for url in seeds}
@@ -74,7 +70,7 @@ async def _crawl(
     seen_content: set[bytes] = set()
     robots: dict[str, RobotFileParser] = {}
 
-    while queue and result.pages + result.pdfs < max_pages:
+    while queue and snapshot.pages + snapshot.pdfs < max_pages:
         url, depth = queue.popleft()
         if not await _allowed(client, url, robots):
             log.debug("robots.txt forbids %s", url)
@@ -84,7 +80,7 @@ async def _crawl(
         except (httpx.HTTPError, httpx.InvalidURL) as exc:
             log.debug("Failed to fetch %s: %s", url, exc)
             if depth == 0:
-                result.error = f"{type(exc).__name__}: {exc}"
+                snapshot.error = f"{type(exc).__name__}: {exc}"
             continue
         if fetched is None:
             continue
@@ -98,21 +94,21 @@ async def _crawl(
 
         if "pdf" in content_type or body.startswith(b"%PDF"):
             log.debug("PDF  %s", final_url)
-            result.pdfs += 1
+            snapshot.pdfs += 1
             text = _pdf_text(body)
             if not text.strip():
-                result.unreadable_pdfs.append(final_url)
+                snapshot.unreadable_pdfs.append(final_url)
                 continue
-            result.hits += find_hits(text, terms, final_url, "pdf", whole_word)
+            snapshot.documents.append(Document(final_url, "pdf", text))
 
         elif "html" in content_type:
             log.debug("HTML %s", final_url)
-            result.pages += 1
+            snapshot.pages += 1
             soup = BeautifulSoup(body, "html.parser")
             links = _menu_links(soup, final_url) if depth < config.MAX_DEPTH else []
             for tag in soup(["script", "style", "noscript"]):
                 tag.decompose()
-            result.hits += find_hits(soup.get_text(" "), terms, final_url, "html", whole_word)
+            snapshot.documents.append(Document(final_url, "html", soup.get_text(" ")))
 
             for link in links:
                 key = _url_key(link)

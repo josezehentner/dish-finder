@@ -15,12 +15,24 @@ Several terms = any of them counts. `-v` also lists places without hits,
 `--debug` logs every fetched URL and why pages were skipped. All settings
 (timeouts, mirrors, menu keywords, defaults) live in `config.py`.
 
+### Cache
+
+Everything fetched is stored in `~/.cache/dish-finder/cache.sqlite3`: place lookups,
+OSM results and the extracted text of every crawled website. The first search in an
+area crawls (~1–2 min); every further search there — for any dish — takes well under a second.
+
+- Entries expire after 14 days, failed crawls (dead domain, timeout) after 1 day.
+- `--refresh` fetches everything again and updates the cache.
+- `--no-cache` neither reads nor writes it.
+- To wipe it: `rm ~/.cache/dish-finder/cache.sqlite3`.
+
 ## How it works
 
 1. `osm.py` — geocodes the place and fetches all restaurants/cafés/bars/pubs in the radius with a `website` tag.
-2. `crawler.py` — per restaurant: homepage → links that look like menus (*Karte, Menü, Speise, Getränke, pdf, …*) → up to 2 levels deep. Reads HTML text and PDF text, respects `robots.txt`.
+2. `crawler.py` — per website: homepage → links that look like menus (*Karte, Menü, Speise, Getränke, pdf, …*) → up to 2 levels deep. Reads HTML text and PDF text, respects `robots.txt`.
    The same page or PDF under several URLs (http/https, `www.`, trailing slash, mirrors) is only counted once.
-3. `matching.py` — case/umlaut-insensitive search (`Spätzle` == `spaetzle`), prints a snippet per hit.
+3. `cache.py` — SQLite cache (tables `lookups`, `sites`, `documents`). Crawled text is stored independent of the search term.
+4. `matching.py` — case/umlaut-insensitive search (`Spätzle` == `spaetzle`), prints a snippet per hit.
 
 ## Development
 
