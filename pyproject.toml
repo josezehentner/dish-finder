@@ -1,0 +1,70 @@
+[project]
+name = "dish-finder"
+version = "0.1.0"
+description = "Find restaurants nearby whose website or PDF menu mentions a specific dish or drink, using OpenStreetMap only."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "José Zehentner", email = "188351564+josezehentner@users.noreply.github.com" },
+]
+keywords = ["openstreetmap", "overpass", "restaurants", "menu", "crawler", "scraping"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+]
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "httpx>=0.28.1",
+    "pypdf>=6.19.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.0",
+    "pre-commit>=4.6.2",
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
+
+[tool.pytest.ini_options]
+# Flat layout: make the top-level modules (osm, crawler, ...) importable from tests/.
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle
+    "F",       # pyflakes
+    "I",       # isort
+    "UP",      # pyupgrade
+    "B",       # bugbear
+    "SIM",     # simplify
+    "C4",      # comprehensions
+    "PT",      # pytest style
+    "RUF",     # ruff-specific
+]
+ignore = [
+    "RUF001",  # ambiguous unicode (×, …, ✔ are intentional in output)
+    "RUF003",
+]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+files = ["*.py", "tests"]
+
+[[tool.mypy.overrides]]
+# Tests use pytest fixtures without type annotations.
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+check_untyped_defs = true
