@@ -1,4 +1,5 @@
 import logging
+import re
 import sys
 from dataclasses import dataclass, field
 
@@ -157,7 +158,7 @@ class TestCaching:
         assert fakes.geocoded == ["Wien"]
         assert len(fakes.searched) == 1
         assert len(fakes.crawled) == 1
-        assert "💾 2 websites from cache, crawling 0" in capsys.readouterr().err
+        assert "💾  2 websites from cache, crawling 0" in capsys.readouterr().err
 
     def test_new_search_uses_cached_text(self, capsys, fakes):
         cli.main(["Tafelspitz", "--coords", "1", "2"])
@@ -238,7 +239,7 @@ class TestLogging:
     def test_status_goes_to_stderr_results_to_stdout(self, capsys, fakes):
         cli.main(["Tafelspitz", "--near", "Wien"])
         captured = capsys.readouterr()
-        assert "📍 Wien" in captured.err
+        assert "📍  Wien" in captured.err
         assert "📍" not in captured.out
         assert "Tafelspitz found at" in captured.out
 
@@ -252,7 +253,20 @@ class TestLogging:
         monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
         cli.main(["Tafelspitz", "--coords", "1", "2"])
         err = capsys.readouterr().err
-        assert "\r🔎 crawling 1/2\r🔎 crawling 2/2\r\033[K" in err
+        assert "\r🔎  crawling 1/2\r🔎  crawling 2/2\r\033[K" in err
+
+    def test_status_lines_have_an_emoji_and_two_spaces(self, monkeypatch, capsys, fakes):
+        monkeypatch.setattr(sys.stderr, "isatty", lambda: True)  # include the progress line
+        fakes.restaurants.append(make_restaurant("https://far.at", name="Far"))
+        fakes.pages["https://far.at"] = Snapshot()
+
+        cli.main(["Tafelspitz", "--near", "Wien", "--limit", "2"])
+
+        err = capsys.readouterr().err.replace("\033[K", "")
+        lines = [line for line in re.split(r"[\r\n]", err) if line]
+        assert len(lines) >= 5  # 📍 🍴 📏 💾 🔎
+        for line in lines:
+            assert re.fullmatch(r"[^\w\s]  \S.*", line), f"badly spaced status line: {line!r}"
 
     def test_no_progress_line_when_stderr_is_not_a_terminal(self, capsys, fakes):
         cli.main(["Tafelspitz", "--coords", "1", "2"])
@@ -322,7 +336,7 @@ class TestLimit:
 
     def test_logs_how_far_the_limited_search_reaches(self, capsys, spread):
         cli.main(["Mate", "--coords", "48.2", "16.35", "--limit", "2"])
-        assert "📏 limited to the 2 nearest (up to 200 m away)" in capsys.readouterr().err
+        assert "📏  limited to the 2 nearest (up to 200 m away)" in capsys.readouterr().err
 
     def test_limit_at_or_above_count_changes_nothing(self, capsys, spread):
         cli.main(["Mate", "--coords", "48.2", "16.35", "--limit", "4"])

@@ -93,7 +93,7 @@ def _overpass(query: str) -> list[dict[str, Any]]:
     for attempt in range(config.OVERPASS_ATTEMPTS):
         if attempt:
             wait = config.OVERPASS_RETRY_DELAY * attempt
-            log.warning("⏳ Overpass servers busy, retrying in %s s…", wait)
+            log.warning("⏳  Overpass servers busy, retrying in %s s…", wait)
             time.sleep(wait)
         for url in config.OVERPASS_URLS:
             try:

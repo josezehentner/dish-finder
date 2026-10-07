@@ -161,7 +161,7 @@ class TestOsmLogging:
             osm._overpass("query")
 
         warnings = [r.message for r in caplog.records if r.levelno == logging.WARNING]
-        assert warnings == ["⏳ Overpass servers busy, retrying in 10 s…"]
+        assert warnings == ["⏳  Overpass servers busy, retrying in 10 s…"]
         assert f"Overpass server {OVERPASS_URLS[0]} failed: down" in caplog.messages
 
     def test_geocode_logs_matched_place(self, monkeypatch, caplog):

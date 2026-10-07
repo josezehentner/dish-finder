@@ -111,7 +111,7 @@ def collect_snapshots(cache: Cache, places: list[Restaurant], args: argparse.Nam
             snapshots[key] = cached
         else:
             to_crawl[key] = place
-    log.info("💾 %s websites from cache, crawling %s", len(snapshots), len(to_crawl))
+    log.info("💾  %s websites from cache, crawling %s", len(snapshots), len(to_crawl))
     if not to_crawl:
         return snapshots
 
@@ -128,7 +128,7 @@ def collect_snapshots(cache: Cache, places: list[Restaurant], args: argparse.Nam
         if args.debug:
             log.debug("Done %s/%s: %s", done, len(to_crawl), place.name)
         elif show_progress:
-            print(f"\r🔎 crawling {done}/{len(to_crawl)}", end="", file=sys.stderr, flush=True)
+            print(f"\r🔎  crawling {done}/{len(to_crawl)}", end="", file=sys.stderr, flush=True)
 
     asyncio.run(
         crawl_all(list(to_crawl.values()), max_pages=args.max_pages, concurrency=args.concurrency, on_done=on_done)
@@ -141,17 +141,17 @@ def collect_snapshots(cache: Cache, places: list[Restaurant], args: argparse.Nam
 def run(args: argparse.Namespace, cache: Cache) -> None:
     if args.near:
         lat, lon = cached_geocode(cache, args.near)
-        log.info("📍 %s → %.5f, %.5f", args.near, lat, lon)
+        log.info("📍  %s → %.5f, %.5f", args.near, lat, lon)
     else:
         lat, lon = args.coords
 
     restaurants = cached_restaurants(cache, lat, lon, args.radius)
     with_website = [r for r in restaurants if r.websites]
-    log.info("🍽  %s places in %s m, %s with a website", len(restaurants), args.radius, len(with_website))
+    log.info("🍴  %s places in %s m, %s with a website", len(restaurants), args.radius, len(with_website))
     if args.limit is not None and args.limit < len(with_website):
         with_website = nearest(with_website, lat, lon, args.limit)
         farthest = round(distance_m(lat, lon, with_website[-1].lat, with_website[-1].lon))
-        log.info("📏 limited to the %s nearest (up to %s m away)", args.limit, farthest)
+        log.info("📏  limited to the %s nearest (up to %s m away)", args.limit, farthest)
     if not with_website:
         return
 
