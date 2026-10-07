@@ -9,25 +9,19 @@ import argparse
 import asyncio
 import logging
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 
 from dish_finder import config
 from dish_finder.cache import Cache, site_key
 from dish_finder.crawler import Snapshot, crawl_all
-from dish_finder.matching import Hit, search
+from dish_finder.matching import search
 from dish_finder.osm import Restaurant, distance_m, find_restaurants, geocode, nearest
+from dish_finder.output import Result, Style, render_report
 
 log = logging.getLogger(__name__)
 
 # Third-party loggers that are too chatty for the console.
 NOISY_LOGGERS = ("httpx", "httpcore", "pypdf")
-
-
-@dataclass
-class Result:
-    restaurant: Restaurant
-    snapshot: Snapshot
-    hits: list[Hit]
 
 
 def positive_int(value: str) -> int:
@@ -85,25 +79,6 @@ def configure_logging(debug: bool) -> None:
         logging.getLogger(name).setLevel(logging.WARNING if debug else logging.ERROR)
 
 
-def print_hit(result: Result) -> None:
-    r = result.restaurant
-    print(f"\n✔ {r.name} ({r.amenity})")
-    print(f"  {r.osm_url}")
-    for hit in result.hits:
-        print(f"  [{hit.kind}] {hit.url}  '{hit.term}' ×{hit.count}")
-        print(f"      …{hit.snippet}…")
-
-
-def print_miss(result: Result) -> None:
-    r, snap = result.restaurant, result.snapshot
-    details = f"{snap.pages} pages, {snap.pdfs} PDFs"
-    if snap.unreadable_pdfs:
-        details += f", {len(snap.unreadable_pdfs)} PDFs without text (scanned?)"
-    if snap.error:
-        details += f", error: {snap.error}"
-    print(f"  ✘ {r.name} — {r.websites[0]} ({details})")
-
-
 def cached_geocode(cache: Cache, place: str) -> tuple[float, float]:
     key = f"geocode:{place.strip().casefold()}"
     if (cached := cache.get_json(key)) is not None:
@@ -141,6 +116,8 @@ def collect_snapshots(cache: Cache, places: list[Restaurant], args: argparse.Nam
         return snapshots
 
     done = 0
+    # A self-overwriting progress line: only on a real terminal, and never mixed into debug logs.
+    show_progress = not args.debug and sys.stderr.isatty()
 
     def on_done(place: Restaurant, snapshot: Snapshot) -> None:
         nonlocal done
@@ -150,15 +127,14 @@ def collect_snapshots(cache: Cache, places: list[Restaurant], args: argparse.Nam
         cache.put_snapshot(key, snapshot)  # failed crawls expire sooner, see config.CACHE_ERROR_MAX_AGE
         if args.debug:
             log.debug("Done %s/%s: %s", done, len(to_crawl), place.name)
-        else:
-            # A single self-overwriting progress line; it would garble debug output.
-            print(f"\r🔎 crawled {done}/{len(to_crawl)}", end="", file=sys.stderr, flush=True)
+        elif show_progress:
+            print(f"\r🔎 crawling {done}/{len(to_crawl)}", end="", file=sys.stderr, flush=True)
 
     asyncio.run(
         crawl_all(list(to_crawl.values()), max_pages=args.max_pages, concurrency=args.concurrency, on_done=on_done)
     )
-    if not args.debug:
-        print(file=sys.stderr)  # end the progress line
+    if show_progress:
+        print("\r\033[K", end="", file=sys.stderr, flush=True)  # erase the progress line
     return snapshots
 
 
@@ -183,17 +159,11 @@ def run(args: argparse.Namespace, cache: Cache) -> None:
     results = []
     for place in with_website:
         snapshot = snapshots[site_key(place.websites)]
-        results.append(Result(place, snapshot, search(snapshot.documents, args.terms, args.whole_word)))
+        hits = search(snapshot.documents, args.terms, args.whole_word)
+        results.append(Result(place, snapshot, hits, distance_m(lat, lon, place.lat, place.lon)))
 
-    found = sorted((r for r in results if r.hits), key=lambda r: r.restaurant.name.casefold())
-    print(f"\n{len(found)} of {len(results)} crawled places mention {' / '.join(args.terms)}")
-    for result in found:
-        print_hit(result)
-
-    if args.verbose:
-        print("\nNo hits:")
-        for result in sorted((r for r in results if not r.hits), key=lambda r: r.restaurant.name.casefold()):
-            print_miss(result)
+    print()
+    print(render_report(results, args.terms, args.verbose, Style.for_stream(sys.stdout)))
 
 
 def main(argv: list[str] | None = None) -> None:

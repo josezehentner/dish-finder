@@ -227,3 +227,17 @@ class TestNearest:
 
     def test_empty(self):
         assert osm.nearest([], 48.2, 16.35, limit=3) == []
+
+
+class TestGoogleMapsUrl:
+    def test_pin_at_coordinates(self):
+        assert osm.google_maps_url(48.2108014, 16.3479407) == (
+            "https://www.google.com/maps/search/?api=1&query=48.2108014,16.3479407"
+        )
+
+    def test_rounds_to_seven_decimals(self):
+        # 7 decimals ≈ 1 cm, the precision OSM stores
+        assert (
+            osm.google_maps_url(48.123456789, -16.0)
+            == "https://www.google.com/maps/search/?api=1&query=48.1234568,-16.0"
+        )

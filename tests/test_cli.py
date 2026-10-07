@@ -6,7 +6,7 @@ import pytest
 
 from dish_finder import cli, config
 from dish_finder.crawler import Snapshot
-from dish_finder.matching import Document, Hit
+from dish_finder.matching import Document
 from dish_finder.osm import Restaurant
 from tests.conftest import make_restaurant
 
@@ -14,11 +14,6 @@ from tests.conftest import make_restaurant
 def parse(monkeypatch, *argv: str):
     monkeypatch.setattr(sys, "argv", ["cli.py", *argv])
     return cli.parse_args()
-
-
-def hit_result(name: str = "Wirt") -> cli.Result:
-    hit = Hit("Tafelspitz", "https://wirt.at/karte.pdf", "pdf", 2, "wiener tafelspitz 24,90")
-    return cli.Result(make_restaurant("https://wirt.at", name=name), Snapshot(pages=1, pdfs=1), [hit])
 
 
 class TestParseArgs:
@@ -52,23 +47,6 @@ class TestParseArgs:
     def test_invalid_arguments_exit(self, monkeypatch, argv):
         with pytest.raises(SystemExit):
             parse(monkeypatch, *argv)
-
-
-class TestOutput:
-    def test_print_hit(self, capsys):
-        cli.print_hit(hit_result())
-        out = capsys.readouterr().out
-        assert "✔ Wirt (restaurant)" in out
-        assert "[pdf] https://wirt.at/karte.pdf  'Tafelspitz' ×2" in out
-        assert "…wiener tafelspitz 24,90…" in out
-
-    def test_print_miss_shows_details(self, capsys):
-        snapshot = Snapshot(pages=2, pdfs=1, unreadable_pdfs=["x.pdf"], error="timeout")
-        cli.print_miss(cli.Result(make_restaurant("https://wirt.at"), snapshot, []))
-        out = capsys.readouterr().out
-        assert "✘ Gasthaus Test — https://wirt.at (2 pages, 1 PDFs" in out
-        assert "1 PDFs without text" in out
-        assert "error: timeout" in out
 
 
 @dataclass
@@ -131,9 +109,9 @@ class TestMain:
         assert fakes.crawl_options["max_pages"] == 15
 
         captured = capsys.readouterr()
-        assert "1 of 2 crawled places mention Tafelspitz" in captured.out
-        assert "✔ Wirt" in captured.out
-        assert "[html] https://wirt.at/karte  'Tafelspitz' ×1" in captured.out
+        assert "Tafelspitz found at 1 of 2 places" in captured.out
+        assert "⏺ Wirt · restaurant" in captured.out
+        assert "     HTML  https://wirt.at/karte\n           Tafelspitz\n" in captured.out
         assert "Miss" not in captured.out
         assert "3 places in 300 m, 2 with a website" in captured.err
 
@@ -143,15 +121,15 @@ class TestMain:
         assert fakes.searched == [(1.5, 2.5, 1000)]
 
     def test_verbose_lists_misses(self, capsys, fakes):
-        cli.main(["Tafelspitz", "--coords", "1", "2", "-v"])
+        cli.main(["Tafelspitz", "--coords", "48.2", "16.35", "-v"])
         out = capsys.readouterr().out
-        assert "No hits:" in out
-        assert "✘ Miss — https://x.at (1 pages, 0 PDFs)" in out
+        assert "No match (1)" in out
+        assert "  · Miss · restaurant · 0 m  https://x.at  1 page, 0 PDFs" in out
 
     def test_whole_word_is_applied_to_search(self, capsys, fakes):
         fakes.pages["https://wirt.at"] = Snapshot(documents=[Document("https://wirt.at", "html", "Tomatensuppe")])
         cli.main(["mate", "--coords", "1", "2", "--whole-word"])
-        assert "0 of 2 crawled places" in capsys.readouterr().out
+        assert "mate not found (2 places searched)" in capsys.readouterr().out
 
     def test_stops_when_no_place_has_a_website(self, fakes):
         fakes.restaurants[:] = [make_restaurant(name="Offline")]
@@ -165,8 +143,8 @@ class TestMain:
 
         assert fakes.crawled == [["Wirt", "Miss"]]
         out = capsys.readouterr().out
-        assert "2 of 3 crawled places mention Tafelspitz" in out
-        assert "✔ Wirt Schanigarten" in out
+        assert "Tafelspitz found at 2 of 3 places" in out
+        assert "⏺ Wirt Schanigarten" in out
 
 
 class TestCaching:
@@ -188,8 +166,8 @@ class TestCaching:
         cli.main(["Schnitzel", "--coords", "1", "2"])
 
         out = capsys.readouterr().out
-        assert "1 of 2 crawled places mention Schnitzel" in out
-        assert "✔ Miss" in out
+        assert "Schnitzel found at 1 of 2 places" in out
+        assert "⏺ Miss" in out
 
     def test_place_names_are_cached_case_insensitively(self, fakes):
         cli.main(["Mate", "--near", "Wien"])
@@ -216,7 +194,7 @@ class TestCaching:
         cli.main(["Club Mate", "--coords", "1", "2"])
 
         assert len(fakes.crawled) == 2
-        assert "✔ Miss" in capsys.readouterr().out
+        assert "⏺ Miss" in capsys.readouterr().out
 
     def test_no_cache_neither_reads_nor_writes(self, fakes, isolated_cache):
         cli.main(["Mate", "--near", "Wien", "--no-cache"])
@@ -231,7 +209,7 @@ class TestCaching:
         cli.main(["Mate", "--coords", "1", "2", "-v"])
 
         assert fakes.crawled == [["Wirt", "Miss"]]
-        assert "error: ConnectError: down" in capsys.readouterr().out
+        assert "0 pages, 0 PDFs  ConnectError: down" in capsys.readouterr().out
 
     def test_failed_crawls_are_retried_once_expired(self, monkeypatch, fakes):
         fakes.pages["https://x.at"] = Snapshot(error="ConnectError: down")
@@ -262,17 +240,36 @@ class TestLogging:
         captured = capsys.readouterr()
         assert "📍 Wien" in captured.err
         assert "📍" not in captured.out
-        assert "crawled places mention" in captured.out
+        assert "Tafelspitz found at" in captured.out
 
     def test_debug_replaces_progress_line_with_log_messages(self, capsys, fakes):
         cli.main(["Tafelspitz", "--coords", "1", "2", "--debug"])
         err = capsys.readouterr().err
-        assert "🔎 crawled" not in err
+        assert "🔎" not in err
         assert "Done 1/2: Wirt" in err
 
-    def test_normal_mode_shows_progress_line(self, capsys, fakes):
+    def test_terminal_shows_progress_line_and_erases_it(self, monkeypatch, capsys, fakes):
+        monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
         cli.main(["Tafelspitz", "--coords", "1", "2"])
-        assert "🔎 crawled 2/2" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "\r🔎 crawling 1/2\r🔎 crawling 2/2\r\033[K" in err
+
+    def test_no_progress_line_when_stderr_is_not_a_terminal(self, capsys, fakes):
+        cli.main(["Tafelspitz", "--coords", "1", "2"])
+        assert "🔎" not in capsys.readouterr().err
+
+    def test_report_links_google_maps_first(self, capsys, fakes):
+        cli.main(["Tafelspitz", "--coords", "1", "2"])
+        links = [line.split()[-1] for line in capsys.readouterr().out.splitlines() if "https://" in line]
+        assert links[:3] == [
+            "https://www.google.com/maps/search/?api=1&query=48.2,16.35",
+            "https://www.openstreetmap.org/node/1",
+            "https://wirt.at",
+        ]
+
+    def test_results_are_plain_text_when_piped(self, capsys, fakes):
+        cli.main(["Tafelspitz", "--coords", "1", "2"])
+        assert "\033[" not in capsys.readouterr().out
 
 
 def place_north(name: str, meters: float, website: bool = True) -> Restaurant:
@@ -320,8 +317,8 @@ class TestLimit:
     def test_results_only_include_limited_places(self, capsys, spread):
         cli.main(["Mate", "--coords", "48.2", "16.35", "--limit", "3"])
         out = capsys.readouterr().out
-        assert "3 of 3 crawled places mention Mate" in out
-        assert "✔ E" not in out
+        assert "Mate found at 3 of 3 places" in out
+        assert "⏺ E" not in out
 
     def test_logs_how_far_the_limited_search_reaches(self, capsys, spread):
         cli.main(["Mate", "--coords", "48.2", "16.35", "--limit", "2"])

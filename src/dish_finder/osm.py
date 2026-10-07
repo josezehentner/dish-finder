@@ -34,6 +34,11 @@ def distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(a))
 
 
+def google_maps_url(lat: float, lon: float) -> str:
+    """Link that opens Google Maps with a pin at the coordinates (official Maps URLs format)."""
+    return f"https://www.google.com/maps/search/?api=1&query={round(lat, 7)},{round(lon, 7)}"
+
+
 def nearest(restaurants: list[Restaurant], lat: float, lon: float, limit: int | None = None) -> list[Restaurant]:
     """Sort by distance from (lat, lon), nearest first, and keep at most `limit`."""
     by_distance = sorted(restaurants, key=lambda r: distance_m(lat, lon, r.lat, r.lon))
