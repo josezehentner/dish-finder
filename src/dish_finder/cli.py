@@ -15,7 +15,7 @@ from dish_finder import config
 from dish_finder.cache import Cache, site_key
 from dish_finder.crawler import Snapshot, crawl_all
 from dish_finder.matching import Hit, search
-from dish_finder.osm import Restaurant, find_restaurants, geocode
+from dish_finder.osm import Restaurant, distance_m, find_restaurants, geocode, nearest
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +28,13 @@ class Result:
     restaurant: Restaurant
     snapshot: Snapshot
     hits: list[Hit]
+
+
+def positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {number}")
+    return number
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -52,6 +59,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=config.DEFAULT_CONCURRENCY,
         help="restaurants crawled in parallel (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=positive_int,
+        metavar="N",
+        help="only search the N nearest places with a website (default: all in the radius)",
     )
     parser.add_argument("--whole-word", action="store_true", help="'mate' won't match 'tomate'")
     parser.add_argument("-v", "--verbose", action="store_true", help="also list restaurants without hits")
@@ -159,6 +172,10 @@ def run(args: argparse.Namespace, cache: Cache) -> None:
     restaurants = cached_restaurants(cache, lat, lon, args.radius)
     with_website = [r for r in restaurants if r.websites]
     log.info("🍽  %s places in %s m, %s with a website", len(restaurants), args.radius, len(with_website))
+    if args.limit is not None and args.limit < len(with_website):
+        with_website = nearest(with_website, lat, lon, args.limit)
+        farthest = round(distance_m(lat, lon, with_website[-1].lat, with_website[-1].lon))
+        log.info("📏 limited to the %s nearest (up to %s m away)", args.limit, farthest)
     if not with_website:
         return
 

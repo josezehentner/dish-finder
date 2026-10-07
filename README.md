@@ -9,7 +9,11 @@ OpenStreetMap only (Nominatim + Overpass) — no API keys, no costs.
 ```bash
 uv run dish-finder Tafelspitz --near "Wien Neubau" --radius 600
 uv run dish-finder "Club Mate" Mate --coords 48.2 16.35 --whole-word -v
+uv run dish-finder Gulasch --near "Wien Westbahnhof" --radius 2000 --limit 30
 ```
+
+`--limit N` only searches the N nearest places that have a website (nearest first),
+which keeps big radii fast.
 
 Several terms = any of them counts. `-v` also lists places without hits,
 `--debug` logs every fetched URL and why pages were skipped. All settings

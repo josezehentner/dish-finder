@@ -1,4 +1,5 @@
 import logging
+import math
 from typing import Any
 
 import httpx
@@ -171,3 +172,58 @@ class TestOsmLogging:
             geocode("Westbahnhof")
 
         assert "Geocoded 'Westbahnhof' as Westbahnhof, Wien" in caplog.messages
+
+
+METERS_PER_DEGREE = 2 * math.pi * osm.EARTH_RADIUS_M / 360  # ≈ 111 195 m along a meridian
+
+
+def place_at(name: str, lat: float, lon: float = 16.35) -> Restaurant:
+    return Restaurant(name, "restaurant", lat, lon, [f"https://{name.lower()}.at"], "")
+
+
+class TestDistance:
+    def test_same_point_is_zero(self):
+        assert osm.distance_m(48.2, 16.35, 48.2, 16.35) == 0
+
+    def test_one_degree_of_latitude(self):
+        assert osm.distance_m(48.0, 16.0, 49.0, 16.0) == pytest.approx(METERS_PER_DEGREE)
+
+    def test_longitude_degrees_shrink_towards_the_poles(self):
+        at_equator = osm.distance_m(0, 0, 0, 1)
+        at_60_north = osm.distance_m(60, 0, 60, 1)
+        assert at_equator == pytest.approx(METERS_PER_DEGREE)
+        assert at_60_north == pytest.approx(METERS_PER_DEGREE / 2, rel=1e-3)  # cos(60°) = 0.5
+
+    def test_symmetric(self):
+        assert osm.distance_m(48.2, 16.37, 48.19, 16.33) == osm.distance_m(48.19, 16.33, 48.2, 16.37)
+
+    def test_vienna_stephansplatz_to_westbahnhof(self):
+        # Roughly 2.9 km as the crow flies.
+        assert osm.distance_m(48.20849, 16.37208, 48.19661, 16.33797) == pytest.approx(2900, abs=100)
+
+
+PLACES = (place_at("Far", 48.21), place_at("Near", 48.201), place_at("Middle", 48.205))
+
+
+class TestNearest:
+    def test_sorts_nearest_first(self):
+        assert [r.name for r in osm.nearest(list(PLACES), 48.2, 16.35)] == ["Near", "Middle", "Far"]
+
+    def test_limit_keeps_the_nearest(self):
+        assert [r.name for r in osm.nearest(list(PLACES), 48.2, 16.35, limit=2)] == ["Near", "Middle"]
+
+    def test_limit_larger_than_list(self):
+        assert len(osm.nearest(list(PLACES), 48.2, 16.35, limit=10)) == 3
+
+    def test_distance_counts_in_every_direction(self):
+        south = place_at("South", 48.1995)  # ~56 m south
+        east = place_at("East", 48.2, lon=16.352)  # ~148 m east
+        assert [r.name for r in osm.nearest([east, *PLACES, south], 48.2, 16.35, limit=2)] == ["South", "Near"]
+
+    def test_does_not_modify_the_input(self):
+        places = list(PLACES)
+        osm.nearest(places, 48.2, 16.35, limit=1)
+        assert places == list(PLACES)
+
+    def test_empty(self):
+        assert osm.nearest([], 48.2, 16.35, limit=3) == []

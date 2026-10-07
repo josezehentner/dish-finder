@@ -273,3 +273,66 @@ class TestLogging:
     def test_normal_mode_shows_progress_line(self, capsys, fakes):
         cli.main(["Tafelspitz", "--coords", "1", "2"])
         assert "🔎 crawled 2/2" in capsys.readouterr().err
+
+
+def place_north(name: str, meters: float, website: bool = True) -> Restaurant:
+    """A place `meters` north of the search center (48.2, 16.35)."""
+    lat = 48.2 + meters / 111_195
+    return Restaurant(name, "restaurant", lat, 16.35, [f"https://{name.lower()}.at"] if website else [], "")
+
+
+class TestLimit:
+    @pytest.fixture
+    def spread(self, fakes: Fakes) -> Fakes:
+        """Four places with websites at 300 m, 100 m, 400 m, 200 m plus one without website at 50 m."""
+        fakes.restaurants[:] = [
+            place_north("D", 300),
+            place_north("A", 100),
+            place_north("Offline", 50, website=False),
+            place_north("E", 400),
+            place_north("B", 200),
+        ]
+        for name in "ABDE":
+            url = f"https://{name.lower()}.at"
+            fakes.pages[url] = Snapshot(documents=[Document(url, "html", "Mate")])
+        return fakes
+
+    def test_parses_limit(self, monkeypatch):
+        assert parse(monkeypatch, "Mate", "--near", "Wien", "--limit", "5").limit == 5
+
+    def test_no_limit_by_default(self, monkeypatch):
+        assert parse(monkeypatch, "Mate", "--near", "Wien").limit is None
+
+    @pytest.mark.parametrize("value", ["0", "-3", "abc", "2.5"])
+    def test_rejects_invalid_limits(self, monkeypatch, capsys, value):
+        with pytest.raises(SystemExit):
+            parse(monkeypatch, "Mate", "--near", "Wien", "--limit", value)
+        assert "--limit" in capsys.readouterr().err
+
+    def test_crawls_only_the_nearest(self, spread):
+        cli.main(["Mate", "--coords", "48.2", "16.35", "--limit", "2"])
+        assert spread.crawled == [["A", "B"]]
+
+    def test_places_without_website_do_not_use_up_the_limit(self, spread):
+        cli.main(["Mate", "--coords", "48.2", "16.35", "--limit", "1"])
+        assert spread.crawled == [["A"]]
+
+    def test_results_only_include_limited_places(self, capsys, spread):
+        cli.main(["Mate", "--coords", "48.2", "16.35", "--limit", "3"])
+        out = capsys.readouterr().out
+        assert "3 of 3 crawled places mention Mate" in out
+        assert "✔ E" not in out
+
+    def test_logs_how_far_the_limited_search_reaches(self, capsys, spread):
+        cli.main(["Mate", "--coords", "48.2", "16.35", "--limit", "2"])
+        assert "📏 limited to the 2 nearest (up to 200 m away)" in capsys.readouterr().err
+
+    def test_limit_at_or_above_count_changes_nothing(self, capsys, spread):
+        cli.main(["Mate", "--coords", "48.2", "16.35", "--limit", "4"])
+        assert spread.crawled == [["D", "A", "E", "B"]]  # original order, nothing dropped
+        assert "📏" not in capsys.readouterr().err
+
+    def test_raising_the_limit_later_only_crawls_the_new_places(self, spread):
+        cli.main(["Mate", "--coords", "48.2", "16.35", "--limit", "2"])
+        cli.main(["Mate", "--coords", "48.2", "16.35", "--limit", "3"])
+        assert spread.crawled == [["A", "B"], ["D"]]
