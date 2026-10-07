@@ -1,7 +1,7 @@
 import pytest
 
 from config import SNIPPET_RADIUS
-from matching import Hit, find_hits, normalize
+from matching import Document, Hit, find_hits, normalize, search
 
 
 class TestNormalize:
@@ -70,3 +70,28 @@ class TestFindHits:
 
         assert "tafelspitz" in snippet
         assert len(snippet) <= len("tafelspitz") + 2 * SNIPPET_RADIUS
+
+
+class TestSearch:
+    def test_searches_all_documents_in_order(self):
+        documents = [
+            Document("https://a.at", "html", "Tafelspitz"),
+            Document("https://a.at/karte", "html", "nur Schnitzel"),
+            Document("https://a.at/karte.pdf", "pdf", "Tafelspitz und Club Mate"),
+        ]
+
+        hits = search(documents, ["Tafelspitz", "Club Mate"])
+
+        assert [(h.url, h.kind, h.term) for h in hits] == [
+            ("https://a.at", "html", "Tafelspitz"),
+            ("https://a.at/karte.pdf", "pdf", "Tafelspitz"),
+            ("https://a.at/karte.pdf", "pdf", "Club Mate"),
+        ]
+
+    def test_passes_whole_word_option(self):
+        documents = [Document("u", "html", "Tomatensuppe")]
+        assert search(documents, ["mate"])
+        assert search(documents, ["mate"], whole_word=True) == []
+
+    def test_no_documents(self):
+        assert search([], ["Tafelspitz"]) == []

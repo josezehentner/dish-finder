@@ -2,6 +2,7 @@
 
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -10,6 +11,15 @@ import config
 _GERMAN = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
 
 Kind = Literal["html", "pdf"]
+
+
+@dataclass
+class Document:
+    """Searchable text of one web page or PDF."""
+
+    url: str
+    kind: Kind
+    text: str
 
 
 @dataclass
@@ -43,3 +53,7 @@ def find_hits(text: str, terms: list[str], url: str, kind: Kind, whole_word: boo
         snippet = haystack[max(0, first.start() - radius) : first.end() + radius]
         hits.append(Hit(term, url, kind, len(matches), snippet.strip()))
     return hits
+
+
+def search(documents: Iterable[Document], terms: list[str], whole_word: bool = False) -> list[Hit]:
+    return [hit for doc in documents for hit in find_hits(doc.text, terms, doc.url, doc.kind, whole_word)]
