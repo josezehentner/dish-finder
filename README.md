@@ -12,6 +12,35 @@ uv run dish-finder "Club Mate" Mate --coords 48.2 16.35 --whole-word -v
 uv run dish-finder Gulasch --near "Wien Westbahnhof" --radius 2000 --limit 30
 ```
 
+Example output of the first command above (colored in a terminal, plain when piped or with `NO_COLOR`):
+
+```
+📍  Wien Neubau → 48.20226, 16.34912
+🍴  306 places in 600 m, 189 with a website
+💾  187 websites from cache, crawling 0
+
+Tafelspitz found at 9 of 189 places
+⋮
+⏺ Kriterium · restaurant · 451 m
+  ⎿  Google Maps  https://www.google.com/maps/search/?api=1&query=48.2013751,16.3550566
+     OSM          https://www.openstreetmap.org/node/442997737
+     Website      https://kriterium.at
+
+     HTML  https://kriterium.at/speisekarte
+           …mit Braterdäpfel und Fächergurkerl (A,M) 25,90 Tafelspitz mit Apfelkren, Schnittlauchsauce und Röstkartoffeln…
+
+⏺ Witwe Bolte · restaurant · 494 m
+  ⎿  Google Maps  https://www.google.com/maps/search/?api=1&query=48.2032608,16.3556243
+     OSM          https://www.openstreetmap.org/node/443025473
+     Website      https://www.witwebolte.at
+
+     PDF   https://www.witwebolte.at/pdf/karte.pdf?_=1791407627
+           …Parsley Potatoes 18,9 Tafelspitz vom Alpenrind Apfelkren / Schnittlauchsauce / Cremespinat…  ×2
+⋮
+```
+
+Matches are listed nearest first; snippets show the menu's own spelling.
+
 `--limit N` only searches the N nearest places that have a website (nearest first),
 which keeps big radii fast.
 
@@ -38,7 +67,8 @@ The code lives in `src/dish_finder/`.
 2. `crawler.py` — per website: homepage → links that look like menus (*Karte, Menü, Speise, Getränke, pdf, …*) → up to 2 levels deep. Reads HTML text and PDF text, respects `robots.txt`.
    The same page or PDF under several URLs (http/https, `www.`, trailing slash, mirrors) is only counted once.
 3. `cache.py` — SQLite cache (tables `lookups`, `sites`, `documents`). Crawled text is stored independent of the search term.
-4. `matching.py` — case/umlaut-insensitive search (`Spätzle` == `spaetzle`), prints a snippet per hit.
+4. `matching.py` — case/umlaut-insensitive search (`Spätzle` == `spaetzle`), keeps a snippet in the original spelling.
+5. `output.py` — renders the report: Google Maps / OSM / website links, matches nearest first.
 
 ## Development
 
