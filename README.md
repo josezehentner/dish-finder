@@ -7,8 +7,8 @@ OpenStreetMap only (Nominatim + Overpass) — no API keys, no costs.
 ## Usage
 
 ```bash
-uv run main.py Tafelspitz --near "Wien Neubau" --radius 600
-uv run main.py "Club Mate" Mate --coords 48.2 16.35 --whole-word -v
+uv run dish-finder Tafelspitz --near "Wien Neubau" --radius 600
+uv run dish-finder "Club Mate" Mate --coords 48.2 16.35 --whole-word -v
 ```
 
 Several terms = any of them counts. `-v` also lists places without hits,
@@ -27,6 +27,8 @@ area crawls (~1–2 min); every further search there — for any dish — takes 
 - To wipe it: `rm ~/.cache/dish-finder/cache.sqlite3`.
 
 ## How it works
+
+The code lives in `src/dish_finder/`.
 
 1. `osm.py` — geocodes the place and fetches all restaurants/cafés/bars/pubs in the radius with a `website` tag.
 2. `crawler.py` — per website: homepage → links that look like menus (*Karte, Menü, Speise, Getränke, pdf, …*) → up to 2 levels deep. Reads HTML text and PDF text, respects `robots.txt`.

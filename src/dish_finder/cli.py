@@ -1,8 +1,8 @@
 """dish-finder: which restaurants nearby mention a dish or drink on their website?
 
 Example:
-    uv run main.py Tafelspitz --near "Wien Neubau" --radius 1500
-    uv run main.py "Club Mate" Mate --coords 48.2 16.35 --whole-word
+    uv run dish-finder Tafelspitz --near "Wien Neubau" --radius 1500
+    uv run dish-finder "Club Mate" Mate --coords 48.2 16.35 --whole-word
 """
 
 import argparse
@@ -11,11 +11,11 @@ import logging
 import sys
 from dataclasses import asdict, dataclass
 
-import config
-from cache import Cache, site_key
-from crawler import Snapshot, crawl_all
-from matching import Hit, search
-from osm import Restaurant, find_restaurants, geocode
+from dish_finder import config
+from dish_finder.cache import Cache, site_key
+from dish_finder.crawler import Snapshot, crawl_all
+from dish_finder.matching import Hit, search
+from dish_finder.osm import Restaurant, find_restaurants, geocode
 
 log = logging.getLogger(__name__)
 
@@ -31,7 +31,9 @@ class Result:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Find restaurants whose website or PDF menu mentions a dish or drink.")
+    parser = argparse.ArgumentParser(
+        prog="dish-finder", description="Find restaurants whose website or PDF menu mentions a dish or drink."
+    )
     parser.add_argument("terms", nargs="+", help="dish/drink names; a match on any of them counts")
     location = parser.add_mutually_exclusive_group(required=True)
     location.add_argument("--near", help="place to search around, e.g. 'Wien Neubau'")

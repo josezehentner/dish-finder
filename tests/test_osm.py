@@ -4,10 +4,9 @@ from typing import Any
 import httpx
 import pytest
 
-import config
-import osm
-from config import OVERPASS_URLS, USER_AGENT
-from osm import Restaurant, _websites, find_restaurants, geocode
+from dish_finder import config, osm
+from dish_finder.config import OVERPASS_URLS, USER_AGENT
+from dish_finder.osm import Restaurant, _websites, find_restaurants, geocode
 
 
 def json_response(method: str, url: str, data: object, status: int = 200) -> httpx.Response:
@@ -33,7 +32,7 @@ class FakeHttp:
 @pytest.fixture
 def no_sleep(monkeypatch) -> list[float]:
     sleeps: list[float] = []
-    monkeypatch.setattr("osm.time.sleep", sleeps.append)
+    monkeypatch.setattr("dish_finder.osm.time.sleep", sleeps.append)
     return sleeps
 
 
@@ -157,7 +156,7 @@ class TestOsmLogging:
         success = json_response("POST", OVERPASS_URLS[0], {"elements": []})
         monkeypatch.setattr("httpx.post", FakeHttp(*failures, success))
 
-        with caplog.at_level(logging.DEBUG, logger="osm"):
+        with caplog.at_level(logging.DEBUG, logger="dish_finder.osm"):
             osm._overpass("query")
 
         warnings = [r.message for r in caplog.records if r.levelno == logging.WARNING]
@@ -168,7 +167,7 @@ class TestOsmLogging:
         result = [{"lat": "48.2", "lon": "16.3", "display_name": "Westbahnhof, Wien"}]
         monkeypatch.setattr("httpx.get", FakeHttp(json_response("GET", config.NOMINATIM_URL, result)))
 
-        with caplog.at_level(logging.DEBUG, logger="osm"):
+        with caplog.at_level(logging.DEBUG, logger="dish_finder.osm"):
             geocode("Westbahnhof")
 
         assert "Geocoded 'Westbahnhof' as Westbahnhof, Wien" in caplog.messages

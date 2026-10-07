@@ -14,9 +14,9 @@ import httpx
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
 
-import config
-from matching import Document
-from osm import Restaurant
+from dish_finder import config
+from dish_finder.matching import Document
+from dish_finder.osm import Restaurant
 
 log = logging.getLogger(__name__)
 

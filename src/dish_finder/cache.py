@@ -12,8 +12,8 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Self
 
-from crawler import Snapshot
-from matching import Document
+from dish_finder.crawler import Snapshot
+from dish_finder.matching import Document
 
 # Bump when the schema changes: old caches are then dropped and rebuilt.
 SCHEMA_VERSION = 2

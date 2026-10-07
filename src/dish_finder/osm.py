@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-import config
+from dish_finder import config
 
 log = logging.getLogger(__name__)
 

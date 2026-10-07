@@ -22,6 +22,13 @@ dependencies = [
     "pypdf>=6.19.0",
 ]
 
+[project.scripts]
+dish-finder = "dish_finder.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"
+
 [dependency-groups]
 dev = [
     "mypy>=2.4.0",
@@ -31,12 +38,11 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-# Flat layout: make the top-level modules (osm, crawler, ...) importable from tests/.
-pythonpath = ["."]
 testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 120
+src = ["src", "tests"]
 target-version = "py312"
 
 [tool.ruff.lint]
@@ -59,7 +65,7 @@ ignore = [
 [tool.mypy]
 strict = true
 python_version = "3.12"
-files = ["*.py", "tests"]
+files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
 # Tests use pytest fixtures without type annotations.

@@ -7,8 +7,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-import config
-from osm import Restaurant
+from dish_finder import config
+from dish_finder.osm import Restaurant
 
 # A route answers with a fixed response, builds one from the request, or raises.
 Route = httpx.Response | Callable[[httpx.Request], httpx.Response] | Exception

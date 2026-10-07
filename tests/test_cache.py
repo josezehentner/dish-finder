@@ -2,10 +2,10 @@ import sqlite3
 
 import pytest
 
-import cache as cache_module
-from cache import Cache, site_key
-from crawler import Snapshot
-from matching import Document
+from dish_finder import cache as cache_module
+from dish_finder.cache import Cache, site_key
+from dish_finder.crawler import Snapshot
+from dish_finder.matching import Document
 
 DAY = 24 * 3600
 

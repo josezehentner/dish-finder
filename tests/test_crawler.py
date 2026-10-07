@@ -6,9 +6,8 @@ import httpx
 import pytest
 from bs4 import BeautifulSoup
 
-import config
-import crawler
-from crawler import (
+from dish_finder import config, crawler
+from dish_finder.crawler import (
     Snapshot,
     _allowed,
     _crawl,
@@ -19,7 +18,7 @@ from crawler import (
     _pdf_text,
     crawl_all,
 )
-from matching import Document, Hit, search
+from dish_finder.matching import Document, Hit, search
 from tests.conftest import build_pdf, html, make_restaurant, pdf
 
 SITE = "https://wirt.at"
@@ -409,7 +408,7 @@ class TestDebugLogging:
                 f"{SITE}/karte.pdf": httpx.ConnectError("reset"),
             }
         )
-        with caplog.at_level(logging.DEBUG, logger="crawler"):
+        with caplog.at_level(logging.DEBUG, logger="dish_finder.crawler"):
             crawl(web, f"{SITE}/")
 
         messages = caplog.messages
@@ -422,7 +421,7 @@ class TestDebugLogging:
             raise KeyError("oops")
 
         monkeypatch.setattr(crawler, "_crawl", broken_crawl)
-        with caplog.at_level(logging.DEBUG, logger="crawler"):
+        with caplog.at_level(logging.DEBUG, logger="dish_finder.crawler"):
             asyncio.run(crawl_all([make_restaurant(SITE)], max_pages=1, concurrency=1))
 
         [record] = [r for r in caplog.records if "crashed" in r.message]

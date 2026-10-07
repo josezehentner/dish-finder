@@ -1,7 +1,7 @@
 import pytest
 
-from config import SNIPPET_RADIUS
-from matching import Document, Hit, find_hits, normalize, search
+from dish_finder.config import SNIPPET_RADIUS
+from dish_finder.matching import Document, Hit, find_hits, normalize, search
 
 
 class TestNormalize:
